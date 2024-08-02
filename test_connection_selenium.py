@@ -27,6 +27,19 @@ def test_connection(url):
             print(f"Success: Connected to the web app. Page title is '{page_title}'.")
         else:
             print("Error: Unable to retrieve the page title.")
+            
+        button = driver.find_element(By.ID, 'launch_federated')
+        
+        if button:
+            print("Button found")
+        
+        button.click()
+        
+        WebDriverWait(driver, 60000).until(
+            EC.presence_of_element_located((By.ID, 'completion_element_id')) 
+        )
+        
+        print("Training Completed")
     
     except Exception as e:
         print(f"Error: {e}")
@@ -37,6 +50,5 @@ def test_connection(url):
 
 if __name__ == "__main__":
     # Replace with the URL where your web app is running
-    for i in range(3):
-        web_app_url = 'http://localhost:8080/federated'  # Update this URL if needed
-        test_connection(web_app_url)
+    web_app_url = 'http://localhost:8080'  # Update this URL if needed
+    test_connection(web_app_url)

@@ -9,7 +9,7 @@ def gen_artifacts():
     # Load the ONNX model
     ARTIFACTS_DIR = os.path.join(os.path.dirname(__file__), "artifacts")
 
-    onnx_model = onnx.load(os.path.join("./model", "inference.onnx"))
+    onnx_model = onnx.load(os.path.join("./model", "base_model.onnx"))
 
     # Check if the model has been loaded successfully
     try:
@@ -36,3 +36,6 @@ def gen_artifacts():
         requires_grad=requires_grad,
         frozen_params=frozen_params,
     )
+    
+if __name__ == "__main__":
+    gen_artifacts()

@@ -8,9 +8,10 @@ from artifacts import gen_artifacts
 
 HERE = os.path.dirname(__file__)
 MODEL_PATH = os.path.join(HERE,"model/inference.onnx")
-i = 0
 
 model = onnx.load(MODEL_PATH)
+
+weights = {}
 
 async def update_model(request):
     
@@ -20,29 +21,36 @@ async def update_model(request):
         updated_weights = data.get("updated_weights")
         user_id = data.get("user_id")
         
-        print('RECEIVED DATA FOR USER {}'.format(user_id))
-        
-        data = {}
+        print('RECEIVED DATA FOR USER NUMBER {}'.format(user_id))
+        print(user_id<2)
         
         if user_id < 100:
         
             updated_weights_list = list(updated_weights["cpuData"].values())
             updated_weights_array = np.array(updated_weights_list, dtype=np.float32).reshape((1000,768))
-            data[user_id] = updated_weights_array.astype(np.float32)
-            print(data)
+            weights[user_id] = updated_weights_array.astype(np.float32)
+            print("DATA LENGTH {}".format(len(weights)))
         
         else:
             
-            print(len(data.keys()))
+            print("UPDATING THE MODEL")
+            NBUSER = len(weights.keys())
+    
+            # Assuming all weight matrices have the same shape
+            first_key = next(iter(weights))
+            weight_shape = weights[first_key].shape
+
+            # Create a 3D array to hold all user weights
+            weights_array = np.empty((NBUSER, *weight_shape))
+
+            for i, value in enumerate(weights.values()):
+                weights_array[i] = value
+
+            # Compute the average across the user dimension (axis=0)
+            averaged_weights_array = np.mean(weights_array, axis=0)
             
-            weights = np.array(data.values())
-            
-            CLASSIFIER_WEIGHT = np.empty(shape=(1000,768))
-            
-            for i in range(CLASSIFIER_WEIGHT.shape[0]):
-                for j in range(CLASSIFIER_WEIGHT.shape[1]):
-                    CLASSIFIER_WEIGHT[i][j] = np.mean(weights[i,j,:])
-        
+            CLASSIFIER_WEIGHT = averaged_weights_array.astype(np.float32)
+                                
             for initializer in model.graph.initializer:
     
                 if initializer.name == "classifier.weight":
@@ -68,14 +76,8 @@ async def update_model(request):
 
 
 async def index(request):
+    print("NEW CONNECTION")
     return web.FileResponse("./index.html")
 
 async def style(request):
     return web.FileResponse("./style.css")
-
-def federated(request):
-    print("REQUEST RECEIVED")
-    if (i<100):
-        return web.FileResponse("./federated.js",)
-    else:
-        print("NUMBER OF USERS EXCEEDED")
