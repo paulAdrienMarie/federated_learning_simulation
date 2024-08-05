@@ -1,15 +1,32 @@
-import * as tf from "/dist/tf.min.js";
+import "/dist/tf.min.js";
 import * as ort from "/dist/ort.training.wasm.min.js";
 
 // Set up wasm paths
 ort.env.wasm.wasmPaths = "/dist/";
 ort.env.wasm.numThreads = 1;
+
+// Initialization of both inference training session
+let trainingSession = null;
+let inferenceSession = null;
+
+// Number of epochs
+let NUMEPOCHS = 2;
+
+// Paths to the training artifacts
+const ARTIFACTS_PATH = {
+  checkpointState: "/artifacts/checkpoint",
+  trainModel: "/artifacts/training_model.onnx",
+  evalModel: "/artifacts/eval_model.onnx",
+  optimizerModel: "/artifacts/optimizer_model.onnx",
+};
+
+// Path to the base model
+let MODEL_PATH = "/model/base_model.onnx";
+
 // Worker code for message handling
 self.addEventListener("message", async (event) => {
   let data = event.data;
   console.log(data);
-  console.log(ort);
-  console.log(tf);
   let userId = data.userId;
   // Get the subset of the dataset of the current user
   let dataset = data.dataset;
@@ -36,10 +53,32 @@ self.addEventListener("message", async (event) => {
       await train(base64data[key], value); // retrain the model on the output of chatgpt
     }
   }
-
+  // Warn the main thread that training has been completed for the given userId
   self.postMessage({
     userId: userId,
   });
+
+  // retreive the updated weights from the training session
+  let params = await trainingSession.getContiguousParameters(true);
+
+  // send the updated weights to the backend python server for storage
+  fetch("/update_model", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      updated_weights: params,
+      user_id: userId,
+    }),
+  })
+    .then((response) => response.json())
+    .then((data) => {
+      console.log("Model parameters updated");
+    })
+    .catch((error) => {
+      console.log("Error:", error);
+    });
 
   self.postMessage({
     epochMessage: "Model parameters updated",
@@ -51,35 +90,18 @@ self.onerror = function (error) {
   console.error("Worker error:", error);
 };
 
-let NUMEPOCHS = 2;
-// Initialization of the paths
-
-const ARTIFACTS_PATH = {
-  checkpointState: "/artifacts/checkpoint",
-  trainModel: "/artifacts/training_model.onnx",
-  evalModel: "/artifacts/eval_model.onnx",
-  optimizerModel: "/artifacts/optimizer_model.onnx",
-};
-
-let MODEL_PATH = "/model/base_model.onnx";
-
-// Initialization of the inference session and the training session
-
-let trainingSession = null;
-let inferenceSession = null;
-
 /**
  *  Instantiate an inference session
  * @async
  * @loadInferenceSession
- * @params {model_path}
+ * @param {String} model_path - Path to the base model
  * @returns {Promise<void>}
  */
-async function loadInferenceSession(MODEL_PATH) {
+async function loadInferenceSession(model_path) {
   console.log("Loading Inference Session");
 
   try {
-    inferenceSession = await ort.InferenceSession.create(MODEL_PATH);
+    inferenceSession = await ort.InferenceSession.create(model_path);
     console.log("Inference Session successfully loaded");
   } catch (err) {
     console.log("Error loading the Inference Session:", err);
@@ -91,14 +113,14 @@ async function loadInferenceSession(MODEL_PATH) {
  *  Instantiate a training session
  * @async
  * @loadTrainingSession
- * @params {model_path}
+ * @param {Map{String}} training_paths - Paths to the training artifacts
  * @returns {Promise<void>}
  */
-async function loadTrainingSession(createOptions) {
+async function loadTrainingSession(training_paths) {
   console.log("Trying to load Training Session");
 
   try {
-    trainingSession = await ort.TrainingSession.create(createOptions);
+    trainingSession = await ort.TrainingSession.create(training_paths);
     console.log("Training session loaded");
   } catch (err) {
     console.error("Error loading the training session:", err);
@@ -106,7 +128,7 @@ async function loadTrainingSession(createOptions) {
   }
 }
 
-/** 
+/**
  * Loads JSON from a given URL
  * @async
  * @load_Json
@@ -133,14 +155,14 @@ const pre = await loadJson("/script/preprocessor_config.json");
  * Converts an image in base64 string format into a tensor of shape [1,3,224,224]
  * @async
  * @toTensorAndResize
- * @params {base64Data} the base64 encoded string representing the image
+ * @param {String} base64 - base64 encoded representation of the image
  * @returns {Promise<Tensor>}
  */
-async function toTensorAndResize(base64Data) {
+async function toTensorAndResize(base64) {
   const input_size = 224; // Example input size, adjust if necessary
   const shape = [1, 3, input_size, input_size];
 
-  const imgBlob = await fetch(base64Data).then((res) => res.blob());
+  const imgBlob = await fetch(base64).then((res) => res.blob());
   const imgBitmap = await createImageBitmap(imgBlob);
 
   const canvas = new OffscreenCanvas(input_size, input_size);
@@ -173,30 +195,31 @@ async function toTensorAndResize(base64Data) {
   const imageTensor = new ort.Tensor("float32", dataFromImage, shape);
   return imageTensor;
 }
+
 /**
- * Normalize input image represented as a tensor
- * @param {tensor} tensor 
+ * Normalizes input image represented as a tensor
+ * @param {Tensor} tensor - Image as a Tensor
  * @returns {Tensor}
  */
 async function preprocessImage(tensor) {
-    const imageMean = pre.image_mean;
-    const imageStd = pre.image_std;
-  
-    let data = await tensor.getData();
-  
-    data = data.map(function (value) {
-      return (value / 255.0 - imageMean[0]) / imageStd[0];
-    });
-  
-    let normalizedTensor = new ort.Tensor("float32", data, [1, 3, 224, 224]);
-  
-    return normalizedTensor;
-  }
+  const imageMean = pre.image_mean;
+  const imageStd = pre.image_std;
 
-/** 
+  let data = await tensor.getData();
+
+  data = data.map(function (value) {
+    return (value / 255.0 - imageMean[0]) / imageStd[0];
+  });
+
+  let normalizedTensor = new ort.Tensor("float32", data, [1, 3, 224, 224]);
+
+  return normalizedTensor;
+}
+
+/**
  * Performs softmax activation on logits in array format
  * @softmax
- * @params {logits} Raw outputs of the onnx model
+ * @param {Array[Float32]} logits - Raw outputs of the onnx model
  * @returns {Map} Probability distribution in an array
  */
 function softmax(logits) {
@@ -213,10 +236,11 @@ function softmax(logits) {
     );
   });
 }
-/** 
+
+/**
  * Sorts an array in descending order
  * @argsort
- * @params {array} The array to be sorted
+ * @param {Array[]} array - The array to be sorted
  * @returns {Promise<Array>} The sorted array
  */
 function argsort(array) {
@@ -233,7 +257,7 @@ function argsort(array) {
 /**
  * Creates the expected logits output for a given class
  * @createTargetTensor
- * @params {new_class} The correct class of the image
+ * @param {String} new_class - The correct class of the image
  * @returns {Tensor} A tensor with a highest value at the index of the correct class
  */
 function createTargetTensor(new_class) {
@@ -251,7 +275,7 @@ function createTargetTensor(new_class) {
 /**
  * Performs data augmentation on a given image
  * @augmentImage
- * @params {image}
+ * @param {Tensor} image - Image as a Tensor
  * @returns {Tensor}
  */
 export function augmentImage(image) {
@@ -268,15 +292,15 @@ export function augmentImage(image) {
   return augmentedImage;
 }
 
-/** 
+/**
  * Preprocesses the given image for training
  * @async
  * @preprocessImageTraining
- * @params {base64Data} The base64 encoded string representing the image
- * @params {pre} The json file containing the preprocessing parameters
+ *  @param {String} base64 - base64 encoded representation of the image
+ * @param {Map} pre - The json file containing the preprocessing parameters
  * @returns {Promise<Set[Tensor]>}
  */
-async function preprocessImageTraining(base64Data, pre) {
+async function preprocessImageTraining(base64, pre) {
   const numImages = 7;
   const images = [];
   const inputSize = {
@@ -284,7 +308,7 @@ async function preprocessImageTraining(base64Data, pre) {
     height: pre.size.height,
   };
 
-  let image = await toTensorAndResize(base64Data);
+  let image = await toTensorAndResize(base64);
   const imageData_ = await image.getData();
 
   for (let i = 0; i < numImages; i++) {
@@ -309,20 +333,20 @@ async function preprocessImageTraining(base64Data, pre) {
   return images;
 }
 
-/** 
+/**
  * Runs inference on a given image in base64 encoded string format
  * @async
  * @predict
- * @params {base64Data}
+ * @param {String} base64 - base64 encoded representation of the image
  * @returns {Promise<List[String]>}
  */
-async function predict(base64Data) {
+async function predict(base64) {
   if (!inferenceSession) {
     console.log("Inference session not loaded yet, waiting...");
     await loadInferenceSession(MODEL_PATH);
   }
 
-  let imageTensor = await toTensorAndResize(base64Data);
+  let imageTensor = await toTensorAndResize(base64);
   let inputImage = await preprocessImage(imageTensor);
 
   let feeds = {
@@ -345,10 +369,10 @@ async function predict(base64Data) {
   return labels;
 }
 
-/** 
+/**
  * Stop the current thread for a given time
  * @sleep
- * @params {ms} Integer
+ * @param {Number} ms - Number of ms to wait
  * @returns {Promise<void>}
  */
 function sleep(ms) {
@@ -358,8 +382,8 @@ function sleep(ms) {
 /**
  *  Trains the model on a given image with a given label
  * @train
- * @params {base64} String - base64 encodeed representation of the image
- * @params {new_class} String - the true label of the image
+ * @param {String} base64 - base64 encodeed representation of the image
+ * @param {String} new_classe - the true label of the image
  * @returns {Promise<void>}
  */
 async function train(base64, new_classe) {
@@ -380,6 +404,13 @@ async function train(base64, new_classe) {
   console.log(`Training completed in ${trainingTime}`);
 }
 
+/**
+ * Runs a single epoch of the training loop 
+ * @runTrainingEpoch
+ * @param {Set[Tensor]} images - Set of augmented images of the image to train on
+ * @param {Number} epoch - Current epoch
+ * @param {Tensor} target_tensor - The target tensor
+ */
 async function runTrainingEpoch(images, epoch, target_tensor) {
   const epochStartTime = Date.now();
   const lossNodeName = trainingSession.handler.outputNames[0];
