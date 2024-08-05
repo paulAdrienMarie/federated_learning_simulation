@@ -23,6 +23,8 @@ The training occurs in the frontend in javascriptusing the `ONNXRUNTIME JAVASCRI
 - `artifacts.py` : Script to create the training artifacts. See `README.md` in the artifacts folder
 - `check_conflict.py` : Script to check if there are duplicates in a dataset of images in a folder
 - `make_dataset.py` : Script to create the dataset to evaluate the model
+- `openai_request.py` : Script to create the `train.json` file - dataset used within the training loop in javascript
+- `base64images.py` : Script to create the `train_base64images.json` file that is used within the training loop in javascript
 
 
 ### Web Server
@@ -31,8 +33,7 @@ The training occurs in the frontend in javascriptusing the `ONNXRUNTIME JAVASCRI
 - `routes.py` : Script to specify the routes of the python server
 - `view.py` : Script to define which function to run to handle a request on a route
 - `watcher.py` : Script to restart the server when a file is modified within the project
-- `openai_request.py` : Script to create the `train.json` file - dataset used within the training loop in javascript
-- `base64images.py` : Script to create the `train_base64images.json` file that is used within the training loop in javascript
+
 
 ### Federated Learning 
 
