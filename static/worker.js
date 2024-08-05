@@ -11,6 +11,7 @@ let inferenceSession = null;
 
 // Number of epochs
 let NUMEPOCHS = 2;
+let NUMIMAGES = 5;
 
 // Paths to the training artifacts
 const ARTIFACTS_PATH = {
@@ -53,15 +54,12 @@ self.addEventListener("message", async (event) => {
       await train(base64data[key], value); // retrain the model on the output of chatgpt
     }
   }
-  // Warn the main thread that training has been completed for the given userId
-  self.postMessage({
-    userId: userId,
-  });
 
   // retreive the updated weights from the training session
   let params = await trainingSession.getContiguousParameters(true);
-
+  console.log(`Making requests for user ${userId}`);
   // send the updated weights to the backend python server for storage
+  let start = Date.now();
   fetch("/update_model", {
     method: "POST",
     headers: {
@@ -74,16 +72,17 @@ self.addEventListener("message", async (event) => {
   })
     .then((response) => response.json())
     .then((data) => {
+      self.postMessage({
+        userId: userId,
+      })
+      let request_time = Date.now() - start;
+      console.log(`Request time : ${request_time} milliseconds`);
       console.log("Model parameters updated");
+      console.log(`Request done for user ${userId}`)
     })
     .catch((error) => {
       console.log("Error:", error);
     });
-
-  self.postMessage({
-    epochMessage: "Model parameters updated",
-    reload: true,
-  });
 });
 
 self.onerror = function (error) {
@@ -301,7 +300,7 @@ export function augmentImage(image) {
  * @returns {Promise<Set[Tensor]>}
  */
 async function preprocessImageTraining(base64, pre) {
-  const numImages = 7;
+
   const images = [];
   const inputSize = {
     width: pre.size.width,
@@ -311,7 +310,7 @@ async function preprocessImageTraining(base64, pre) {
   let image = await toTensorAndResize(base64);
   const imageData_ = await image.getData();
 
-  for (let i = 0; i < numImages; i++) {
+  for (let i = 0; i < NUMIMAGES; i++) {
     let imageTensor = tf.tensor(imageData_, [3, 224, 224], "float32");
 
     imageTensor = tf.transpose(imageTensor, [1, 2, 0]);
@@ -367,16 +366,6 @@ async function predict(base64) {
   });
 
   return labels;
-}
-
-/**
- * Stop the current thread for a given time
- * @sleep
- * @param {Number} ms - Number of ms to wait
- * @returns {Promise<void>}
- */
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /**
