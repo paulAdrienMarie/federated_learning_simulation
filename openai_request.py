@@ -1,11 +1,12 @@
 import os
 import base64
-from PIL import Image
 from openai import OpenAI
 from io import BytesIO
-import time
 import json
-from utils import filter
+from utils_dataset import clean_dataset
+from datasets import load_dataset
+import time
+import argparse
 
 api_key = os.environ["OPENAI_API_KEY"]
 
@@ -14,8 +15,7 @@ HERE = os.path.dirname(__file__)
 
 BATCH_SIZE = 5
 PROMPT = f"""\
-Look at the {BATCH_SIZE} images and predict the class that best describes the images for each provided image.
-You will pick a class in the following list of classes:
+Look at the {BATCH_SIZE} images and predict the class that best describes the image for each provided image. There are 1000 classes, each classe is written between single quotes, there can be multiple words for one single classe. Pick a class in the following list of classes, return exactly the name of the class, not just a part of it:
 
 'tench, Tinca tinca', 'goldfish, Carassius auratus', 'great white shark, white shark, man-eater, man-eating shark, Carcharodon carcharias', 'tiger shark, Galeocerdo cuvieri', 'hammerhead, hammerhead shark', 'electric ray, crampfish, numbfish, torpedo', 'stingray', 'cock', 'hen', 'ostrich, Struthio camelus', 'brambling, Fringilla montifringilla', 'goldfinch, Carduelis carduelis', 'house finch, linnet, Carpodacus mexicanus', 
 'junco, snowbird', 'indigo bunting, indigo finch, indigo bird, Passerina cyanea', 'robin, American robin, Turdus migratorius', 'bulbul', 'jay', 'magpie', 'chickadee', 'water ouzel, dipper', 'kite', 'bald eagle, American eagle, Haliaeetus leucocephalus', 'vulture', 'great grey owl, great gray owl, Strix nebulosa', 'European fire salamander, Salamandra salamandra', 'common newt, Triturus vulgaris', 'eft', 'spotted salamander, Ambystoma maculatum',
@@ -60,23 +60,35 @@ class AltGenerator:
     def __init__(self, args):
         self.args = args,
         self.cache = OpenAICache()
+        self.dataset = "detection-datasets/coco"
         
-    def load_from_path(self):
+    def load_from_path(self, arg):
         
-        IMAGES_DIR = "./dest/"
-        images = {}
+        ds = load_dataset(self.dataset)
         
-        for file_name in os.listdir(IMAGES_DIR):
-            
-            file_path = os.path.join(IMAGES_DIR,file_name)
-            
-            if not (os.path.splitext(file_path)[1] == ".png"):
-                pass
-            else:
-                key = os.path.splitext(file_path)[0]
-                images[key] = Image.open(file_path).convert("RGB")
-                
-        return images
+        INDEX_TRAIN = 3500
+        INDEX_TEST = INDEX_TRAIN + 1
+        
+        if arg.option == "train":
+            print(f"Taking the first {INDEX_TRAIN} images")
+            # Retrieve the first 3000 images and their corresponding ids from the validation set
+            images = ds["val"]["image"][:INDEX_TRAIN]
+            ids = ds["val"]["image_id"][:INDEX_TRAIN]
+        elif arg.option == "test":
+            print(f"Taking images from index {INDEX_TEST}")
+            images = ds["val"]["image"][INDEX_TEST:]
+            ids = ds["val"]["image_id"][INDEX_TEST:]
+        else :
+            exit(
+                print("The option you gave is not correct, must be train or test")
+            )
+
+        # Create a dictionary where keys are the ids and values are the images
+        images_dict = {id_: img for id_, img in zip(ids, images)}
+        print(len(images))
+        assert len(images) == 3500, f"Got inconsistent length {len(images)}"
+        
+        return images_dict
 
     def image_message(self, image):
         buffered = BytesIO()
@@ -110,29 +122,29 @@ class AltGenerator:
 
         messages.append(user_message)
 
-        for i in range(3):
-            try:
-                response = client.chat.completions.create(
-                    model="gpt-4o",
-                    response_format={"type": "json_object"},
-                    messages=messages,
-                    temperature=0.0,
-                )
-                content = response.choices[0].message.content
-                # Assuming the response is a simple string for the class or description
-                return [json.loads(content)]
-            except Exception as e:
-                print(f"Failed on attempt {i+1}/3, message : {e}")
-                print(images)
-                print(ids)
-                if i == 2:
-                    raise
-                time.sleep(1)
+        # for i in range(3):
+        #     try:
+        #         response = client.chat.completions.create(
+        #             model="gpt-4o",
+        #             response_format={"type": "json_object"},
+        #             messages=messages,
+        #             temperature=0.0,
+        #         )
+        #         content = response.choices[0].message.content
+        #         # Assuming the response is a simple string for the class or description
+        #         return [json.loads(content)]
+        #     except Exception as e:
+        #         print(f"Failed on attempt {i+1}/3, message : {e}")
+        #         print(images)
+        #         print(ids)
+        #         if i == 2:
+        #             raise
+        #         time.sleep(1)
 
 
-    def __call__(self):
+    def __call__(self,arg):
         
-        images = self.load_from_path()
+        images = self.load_from_path(arg)
         print("IMAGES LENGTH {}".format(len(images)))
         
         dict_items_list = list(images.items())
@@ -151,11 +163,21 @@ class AltGenerator:
             self.cache.cache_generation(uncached_ids, generation[0]["result"])
             j += 1
             
-        print("Dataset saved to dataset.json")
+        print("Dataset saved to cache.json")
         
          
 if __name__ == "__main__":
     args = "Image classification using gpt-4o"
+    
+    parser = argparse.ArgumentParser(
+        prog="Make Dataset"
+    )
+    
+    parser.add_argument("option", type=str, help="Dataset Option")
+    
+    arg = parser.parse_args()
+
     obj = AltGenerator(args=args)
-    obj()
-    filter()
+    obj(arg)
+    print("Start cleaning the dataset")
+    clean_dataset()
