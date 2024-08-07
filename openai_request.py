@@ -3,7 +3,7 @@ import base64
 from openai import OpenAI
 from io import BytesIO
 import json
-from utils_dataset import clean_dataset
+from utils_dataset import DatasetCleaner
 from datasets import load_dataset
 import time
 import argparse
@@ -24,13 +24,37 @@ Look at the {BATCH_SIZE} images and predict the class that best describes the im
 Return the result in a result key that is a list"""
 
 class OpenAICache:
-    def __init__(self):
-        self.CACHE_DIR = "./cache.json"
+    """
+    Save the generated label in json files :
+        - cache_train.json if the passed option is 'train'
+        - cache_test.json if the passed option is 'test'
+        
+    Attributs:
+    CACHE_DIR -- Relative path to the json cache file
+    """
+
+    def __init__(self, option):
+        """
+        Initializes a new OpenAICache instance
+        
+        Arguments:
+        option -- The set of images to process - either train or test
+        """
+        
+        self.CACHE_DIR = f"./cache_{option}.json",
         if not os.path.exists(self.CACHE_DIR):
             with open(self.CACHE_DIR, "w") as f:
                 json.dump({}, f)
         
     def is_cached(self, id):
+        """
+        Checks if a given id is already in the json file.
+        Returns True if it is, False if not.
+        
+        Arguments:
+        id -- The id to check 
+        """
+        
         # Check if cache file exists
         with open(self.CACHE_DIR) as f:
             cache = json.load(f)
@@ -42,6 +66,13 @@ class OpenAICache:
         return id in ids
     
     def cache_generation(self, ids, responses):
+        """
+        Caches a set of ids and responses in the json file.
+        
+        Arguments:
+        ids -- List of ids to cache
+        responses -- List of corresponding responses to cache
+        """
         
         cache = {}
         
@@ -57,24 +88,48 @@ class OpenAICache:
             
             
 class AltGenerator:
-    def __init__(self, args):
-        self.args = args,
-        self.cache = OpenAICache()
-        self.dataset = "detection-datasets/coco"
+    """
+    Generates a label for a set of images using OPENAI API and chatgpt-4o.
+    
+    Attributs:
+    args -- Description of what does the class
+    dataset -- URL of the dataset to use
+    option -- Set of images to treat - can be either train or test
+    cache -- Instance of the OpenAICache class
+    """
+    
+    def __init__(self, args, option):
+        """
+        Initializes a new AltGenerator instance.
         
-    def load_from_path(self, arg):
+        Arguments:
+        args -- Description of what the class does
+        option -- The option given by the user - can be either train or test
+        """
+        
+        self.args = args,
+        self.dataset = "detection-datasets/coco",
+        self.option = option,
+        self.cache = OpenAICache(option = option),
+        
+    def load_images(self):
+        """
+        Loads the images from the COCO dataset.
+        If option is set to train, the first 3500 images are taken.
+        If option is set to test, images from index 3501 are taken.
+        """
         
         ds = load_dataset(self.dataset)
         
         INDEX_TRAIN = 3500
         INDEX_TEST = INDEX_TRAIN + 1
         
-        if arg.option == "train":
+        if self.option == "train":
             print(f"Taking the first {INDEX_TRAIN} images")
             # Retrieve the first 3000 images and their corresponding ids from the validation set
             images = ds["val"]["image"][:INDEX_TRAIN]
             ids = ds["val"]["image_id"][:INDEX_TRAIN]
-        elif arg.option == "test":
+        elif self.option == "test":
             print(f"Taking images from index {INDEX_TEST}")
             images = ds["val"]["image"][INDEX_TEST:]
             ids = ds["val"]["image_id"][INDEX_TEST:]
@@ -91,6 +146,13 @@ class AltGenerator:
         return images_dict
 
     def image_message(self, image):
+        """
+        Creates and formats the message to send to chatGpt-4o 
+        
+        Arguments:
+        image -- The image to create the message for
+        """
+        
         buffered = BytesIO()
         image.save(buffered, format="JPEG")
         img_byte = buffered.getvalue()
@@ -102,6 +164,13 @@ class AltGenerator:
         }
 
     def generate(self, images, ids):
+        """
+        Makes requests to the OPENAI API to get the predicted label
+        
+        Arguments:
+        images -- The set of images to predict a label for
+        ids -- The corresponding set of ids
+        """
     
         messages = [
             {
@@ -142,9 +211,12 @@ class AltGenerator:
                 time.sleep(1)
 
 
-    def __call__(self,arg):
+    def __call__(self):
+        """
+        Handles the whole process for every images of the set of images
+        """
         
-        images = self.load_from_path(arg)
+        images = self.load_images(arg)
         print("IMAGES LENGTH {}".format(len(images)))
         
         dict_items_list = list(images.items())
@@ -163,21 +235,21 @@ class AltGenerator:
             self.cache.cache_generation(uncached_ids, generation[0]["result"])
             j += 1
             
-        print("Dataset saved to cache.json")
+        print(f"Dataset saved to cache_{self.option}.json")
         
          
 if __name__ == "__main__":
     args = "Image classification using gpt-4o"
     
-    parser = argparse.ArgumentParser(
-        prog="Make Dataset"
-    )
-    
+    parser = argparse.ArgumentParser(prog="Make Dataset")
     parser.add_argument("option", type=str, help="Dataset Option")
-    
     arg = parser.parse_args()
 
-    obj = AltGenerator(args=args)
-    obj(arg)
-    print("Start cleaning the dataset")
-    clean_dataset()
+    print(f"START GENERATING LABELS FOR IMAGES OF {str(arg.option).upper()} SET")
+    obj = AltGenerator(args=args, option=arg.option)
+    obj()
+    
+    
+    print("START CLEANING THE DATASET")    
+    clean = DatasetCleaner(arg.option)
+    clean()
