@@ -122,24 +122,24 @@ class AltGenerator:
 
         messages.append(user_message)
 
-        # for i in range(3):
-        #     try:
-        #         response = client.chat.completions.create(
-        #             model="gpt-4o",
-        #             response_format={"type": "json_object"},
-        #             messages=messages,
-        #             temperature=0.0,
-        #         )
-        #         content = response.choices[0].message.content
-        #         # Assuming the response is a simple string for the class or description
-        #         return [json.loads(content)]
-        #     except Exception as e:
-        #         print(f"Failed on attempt {i+1}/3, message : {e}")
-        #         print(images)
-        #         print(ids)
-        #         if i == 2:
-        #             raise
-        #         time.sleep(1)
+        for i in range(3):
+            try:
+                response = client.chat.completions.create(
+                    model="gpt-4o",
+                    response_format={"type": "json_object"},
+                    messages=messages,
+                    temperature=0.0,
+                )
+                content = response.choices[0].message.content
+                # Assuming the response is a simple string for the class or description
+                return [json.loads(content)]
+            except Exception as e:
+                print(f"Failed on attempt {i+1}/3, message : {e}")
+                print(images)
+                print(ids)
+                if i == 2:
+                    raise
+                time.sleep(1)
 
 
     def __call__(self,arg):
