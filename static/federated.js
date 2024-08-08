@@ -3,8 +3,14 @@ import * as ort from "/dist/ort.training.wasm.min.js";
 ort.env.wasm.wasmPaths = "/dist/";
 ort.env.wasm.numThreads = 1;
 
-let NUMIMAGES = 15;
 let BATCHSIZE = 10;
+let NUMUSERS = 200;
+
+let config = await loadJson("/script/config.json");
+let labels = Object.keys(config.label2id);
+let trained = {};
+
+labels.forEach((label) => (trained[label] = 0));
 
 /**
  * Loads JSON from a given URL
@@ -37,8 +43,6 @@ export async function runFederated() {
   let dataset = await loadJson("/script/train.json");
   // Get the length of the dataset
   const datasetLength = Object.keys(dataset).length;
-  // Initialize the number of users
-  let numUsers = 100;
   // Initialize the number of completed users
   let completedUsers = 0;
 
@@ -64,9 +68,9 @@ export async function runFederated() {
 
     for (let j = 0; j < BATCHSIZE; j++) {
       let userIndex = startIndex + j;
-      if (userIndex >= numUsers) break;
+      if (userIndex >= NUMUSERS) break;
       console.log(`Creating Worker for user ${userIndex + 1}`);
-      let i = (userIndex * NUMIMAGES) % datasetLength;
+
       let worker = new Worker("/script/worker.js", {
         type: "module",
       });
@@ -74,7 +78,6 @@ export async function runFederated() {
       // Send the data to the created Worker
       let data = {
         userId: userIndex + 1,
-        dataset: Object.entries(dataset).slice(i, i + NUMIMAGES),
       };
       worker.postMessage(data);
 
@@ -85,6 +88,17 @@ export async function runFederated() {
         new Promise((resolve, reject) => {
           worker.onmessage = (e) => {
             console.log(`User ${e.data.userId} completed training.`);
+            // Get the items where the values are not 0
+            let classes_trained = JSON.parse(e.data.trained);
+            console.log(`Dictionnary classes trained ${classes_trained}`);
+            for (const key in classes_trained) {
+              if (classes_trained.hasOwnProperty(key)) {
+                trained[key] += classes_trained[key];
+                console.log(
+                  `Class ${key} has now been trained ${trained[key]} times`
+                );
+              }
+            }
             resolve();
           };
 
@@ -105,9 +119,20 @@ export async function runFederated() {
     completedUsers += BATCHSIZE;
   }
 
-  for (let i = 0; i < numUsers; i += BATCHSIZE) {
+  for (let i = 0; i < NUMUSERS; i += BATCHSIZE) {
     await runBatch(i);
   }
+
+  // Convert object to an array of [key, value] pairs
+  const entries = Object.entries(trained);
+
+  // Sort the array based on the values in descending order
+  const sortedEntries = entries.sort((a, b) => b[1] - a[1]);
+
+  // Convert the sorted array back into an object
+  const sortedObj = Object.fromEntries(sortedEntries);
+
+  console.log(sortedObj);
 
   let completion_element = document.createElement("p");
   completion_element.id = "completion_element_id";

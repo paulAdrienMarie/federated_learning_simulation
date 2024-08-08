@@ -1,5 +1,5 @@
-import { predict, train } from "./App.js";
-import { runFederated } from './federated.js';
+// import { predict, train } from "./App.js";
+import { runFederated } from "./federated.js";
 
 const fileUpload = document.getElementById("file-upload");
 const imageContainer = document.getElementById("image-container");
@@ -9,10 +9,9 @@ const console = document.getElementById("console");
 const launch_federated = document.getElementById("launch_federated");
 
 // launch federated learning
-launch_federated.addEventListener("click", async function(e) {
+launch_federated.addEventListener("click", async function (e) {
   await runFederated();
-})
-
+});
 
 // read the uploaded file
 fileUpload.addEventListener("change", function (e) {

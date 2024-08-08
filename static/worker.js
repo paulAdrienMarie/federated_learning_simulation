@@ -29,11 +29,15 @@ self.addEventListener("message", async (event) => {
   let data = event.data;
   console.log(data);
   let userId = data.userId;
-  // Get the subset of the dataset of the current user
-  let dataset = data.dataset;
+  
+  var user_file = await loadJson(`/script/dataset/user_${userId}.json`);
+  console.log(user_file);
+  var conf = await loadJson("/script/config.json");
+  let labels = Object.keys(conf.label2id);
+  let trained = {};
 
-  // Get the base64 representation of images from json file, dict{ key, base64 }
-  let base64data = await loadJson("/script/train_base64images.json");
+  labels.forEach((label) => trained[label] = 0);
+  
   console.log(`CURRENTLY RUNNING USER ${userId}`);
   console.log(`LOADING TRAINING SESSION FOR USER ${userId}`);
 
@@ -41,20 +45,29 @@ self.addEventListener("message", async (event) => {
   await loadTrainingSession(ARTIFACTS_PATH);
 
   // Loop over the items of the dataset
-  for (const [key, value] of dataset) {
+  for (const id in user_file) {
+    let gpt_label = user_file[id].label;
+    let base64 = user_file[id].base64;
     // Get the label predicted by the base model
-    let label = await predict(base64data[key]);
+    let label = await predict(base64);
     console.log(
-      `Chat GPT predicted ${value}, ONNX model predicted ${
+      `Chat GPT predicted ${gpt_label}, ONNX model predicted ${
         Object.keys(label)[0]
       }`
     );
     // Compare the label predicted by the base model to the one predicted by chatgpt
-    if (value !== Object.keys(label)[0]) {
-      await train(base64data[key], value); // retrain the model on the output of chatgpt
+    if (gpt_label !== Object.keys(label)[0]) {
+      trained[gpt_label] += 1;
+      await train(base64, gpt_label); // retrain the model on the output of chatgpt
     }
   }
 
+  // Get the items where the values are not 0
+  const filteredEntries = Object.entries(trained).filter(([key, value]) => value !== 0);
+
+  // Convert back to an object (optional)
+  const trained_filtered = Object.fromEntries(filteredEntries);
+  console.log(trained_filtered);
   // retreive the updated weights from the training session
   let params = await trainingSession.getContiguousParameters(true);
   console.log(`Making requests for user ${userId}`);
@@ -74,6 +87,7 @@ self.addEventListener("message", async (event) => {
     .then((data) => {
       self.postMessage({
         userId: userId,
+        trained: JSON.stringify(trained_filtered)
       })
       let request_time = Date.now() - start;
       console.log(`Request time : ${request_time} milliseconds`);
