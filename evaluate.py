@@ -1,77 +1,195 @@
-import os
-from PIL import Image
+import json
+import onnx
+import onnxruntime as ort
+import numpy as np
+import torchvision.transforms as transforms
 from sklearn.metrics import accuracy_score
-from utils_evaluate import load_from_path, get_labels, check_model
-import time
+from datasets import load_dataset
 
-# Define model paths
-BASE_MODEL_PATH = "../../EVAL/model.onnx"
-UPDATED_MODEL_PATH = "./model/inference.onnx"
+class Evaluate:
+    """
+    Evaluates the performances of the updated model resulting
+    from the Federated Learning scenario
+    
+    Attributes:
+    BASE_MODEL_PATH -- The relative path to the onnx base model
+    UPDATED_MODEL_PATH -- The relative path to the onnx updated model
+    TRUE_LABELS_PATH -- The relative path to the json file containing the true labels
+    DATASET -- The dataset used, here COCO
+    """
+    
+    def __init__(self, args):
+        self.args = args
+        self.BASE_MODEL_PATH = "./model/base_model.onnx"
+        self.UPDATED_MODEL_PATH = "./model/inference.onnx"
+        self.TRUE_LABELS_PATH = "./test.json"
+        self.DATASET = "detection-datasets/coco"
 
-# Check models (uncomment these if you need to check the models)
-# check_model(BASE_MODEL_PATH)
-# check_model(UPDATED_MODEL_PATH)
-
-# Define image path
-IMAGES_PATH = "./dataset/"
-images = {}
-
-# Function to replace underscores with spaces
-def replace_underscores_with_spaces(input_string):
-    return input_string.replace('_', ' ')
-
-# Load images
-for class_name in os.listdir(IMAGES_PATH):
-    class_path = os.path.join(IMAGES_PATH, class_name)
-    if os.path.isdir(class_path):  # Ensure it's a directory
-        if '_' in class_name:
-            class_name = replace_underscores_with_spaces(class_name)
-            print(f"Class name after replacing underscores: {class_name}")
-        print(f"Initialized list for class {class_name}")
-        images[class_name] = []
-        for image_name in os.listdir(class_path):
-            image_path = os.path.join(class_path, image_name)
-            try:
-                img = Image.open(image_path).convert("RGB")
-                images[class_name].append(img)
-            except Exception as e:
-                print(f"Failed to load image {image_path}: {e}")
-
-# Prepare true labels and run inference
-Y_true = []
-predictions = []
-updated_predictions = []
-wrong_classifications = {}
-
-for class_name, list_image in images.items():
-    print(f"Starting inference on class '{class_name}' with {len(list_image)} images")
-    wrong_classifications[class_name] = 0
-    for i, img in enumerate(list_image):
+    def load_model(self, path):
+        """
+        Loads an onnx model at a given path
+        
+        Arguments:
+        path -- Relative path to the onnx model file
+        """
+        return onnx.load(path)
+    
+    def load_images(self):
+        """
+        Loads the images to compute testing
+        """
+        ds = load_dataset(self.DATASET)
+        
+        test = self.loadJson(self.TRUE_LABELS_PATH)
+        
+        ids = list(test.keys())
+        images = [img["image"] for img in ds["val"] if str(img["image_id"]) in ids]
+       
+        assert len(images) == len(ids), f"Got inconsistent lenght, images got length : {len(images)} and ids got length : {len(ids)}" 
+       
+        return {id_: img for id_, img in zip(ids, images)}
+        
+    def check_model(self, model):
+        """
+        Checks if the downloaded model is correct
+        
+        Argument:
+        model -- The onnx model to check
+        """
         try:
-            print(f"Running inference on image {i + 1}/{len(list_image)} of class '{class_name}'")
-            pred_base = list(get_labels(img, BASE_MODEL_PATH))[:3]
-            pred_updated = list(get_labels(img, UPDATED_MODEL_PATH))[:3]
-            if class_name not in pred_base or class_name not in pred_updated:
-                print(f"Base model predicted: {pred_base}, Updated model predicted: {pred_updated}")
-                wrong_classifications[class_name] += 1
-                img.show()
-                time.sleep(5)
-            predictions.append(pred_base[0])
-            updated_predictions.append(pred_updated[0])
-            Y_true.append(class_name)
-        except Exception as e:
-            print(f"Failed to run inference on image {i + 1} of class '{class_name}': {e}")
+            onnx.checker.check_model(model)
+        except onnx.checker.ValidationError as e:
+            print(f"The model is invalid: {e}")
+        else:
+            print("The exported model is valid!")
+            
+    def loadJson(self, path):
+        """
+        Loads a json file at a given path
+        
+        Arguments:
+        path -- Relative path to the json file
+        """
+        with open(path) as f:
+            return json.loads(f.read())
+        
+    def save_to_json(self, dictionary, path):
+        """
+        Saves a dict in a json file at a specified path
+        
+        Arguments:
+        dict -- The dictionnary to be saved
+        path -- The path of the json file
+        """
+        with open(path,"w") as f:
+            json.dump(dictionary,f)
+        
+    def preprocess_image(self, img):
+        """
+        Prepares image for inference according to the onnx model input format.
+        Resizes to shape [1, 3, 224, 224] and normalizes with the following parameters:
+            - mean : 0.5
+            - std : 0.5
 
-# Check for consistency in lengths
-assert len(Y_true) == len(predictions), f"Inconsistent lengths between Y_true (got {len(Y_true)}) and predictions (got {len(predictions)})"
-assert len(Y_true) == len(updated_predictions), f"Inconsistent lengths between Y_true (got {len(Y_true)}) and updated_predictions (got {len(updated_predictions)})"
+        Arguments:
+        img -- The image to prepare for inference (PIL Image)
+        """
+        PREPROCESS_CONFIG = "./static/preprocessor_config.json"
+        pre = self.loadJson(PREPROCESS_CONFIG)
+        input_size = (pre["size"]["height"], pre["size"]["width"])
 
-# Calculate and print accuracy
-accuracy_base = accuracy_score(Y_true, predictions)
-accuracy_updated = accuracy_score(Y_true, updated_predictions)
+        transform = transforms.Compose([
+            transforms.Resize(input_size),
+            transforms.Lambda(lambda img: img.convert("RGB")),  # Convert image to RGB if it isn't already
+            transforms.ToTensor(),
+            transforms.Normalize(mean=pre["image_mean"], std=pre["image_std"]),
+        ])
 
-for classe in wrong_classifications.keys():
-    print(f"Class {classe} has {wrong_classifications.get(classe)} wrong classifications") 
+        image = transform(img).unsqueeze(0)  # Add batch dimension
+        return image.numpy()
 
-print(f"Accuracy on the base model: {accuracy_base}")
-print(f"Accuracy on the updated model: {accuracy_updated}")
+    def run_inference(self, path, image):
+        """
+        Runs inference using Inference Session of onnxruntime API
+        
+        Arguments:
+        path -- The path to the onnx model
+        image -- The preprocessed image ready for inference
+        """
+        session = ort.InferenceSession(path)  
+        input_name = session.get_inputs()[0].name
+        output_name = session.get_outputs()[0].name
+        results = session.run([output_name], {input_name: image})
+        return results[0]
+    
+    def softmax(self, array):
+        """
+        Performs softmax activation on an array Object
+        
+        Arguments:
+        array -- Raw outputs of the model
+        """
+        probabilities = np.exp(array) / np.sum(np.exp(array), axis=1, keepdims=True)
+        return probabilities
+    
+    def predict(self, img, path):
+        """
+        Returns the predicted label of the given image using the given model
+        
+        Arguments:
+        img -- The image on which to predict a label (PIL Image)
+        path -- The path to the onnx model to use
+        """
+        CONFIG_PATH = "./static/config.json"
+        id2label = self.loadJson(CONFIG_PATH)["id2label"]
+        # Preprocess the image directly
+        preprocessed_image = self.preprocess_image(img)
+        output = self.run_inference(path, preprocessed_image)
+        probabilities = self.softmax(output)[0]
+        sorted_indices = np.argsort(-probabilities)[0]
+        return id2label[str(sorted_indices)]
+    
+    def compute_accuracy(self, preds):
+        """
+        Computes accuracy score
+        
+        Arguments:
+        preds -- The predictions of a model as a list
+        """
+        Y_true = self.loadJson(self.TRUE_LABELS_PATH)
+        return accuracy_score(list(Y_true.values()), preds)
+        
+    def __call__(self):
+        """
+        Runs inference on both base model and updated model
+        and computes accuracy score
+        """
+        self.check_model(self.load_model(self.BASE_MODEL_PATH))
+        self.check_model(self.load_model(self.UPDATED_MODEL_PATH))
+
+        images = self.load_images()
+        
+        base_model_output = {}
+        updated_model_output = {} 
+        count = 1
+        
+        for id, img in images.items():
+            print(f"Inference running on image {count}/{len(images)}")
+            # run inference on the base model
+            label = self.predict(img, self.BASE_MODEL_PATH)
+            base_model_output[int(id)] = label
+            # run inference on the updated model
+            label = self.predict(img, self.UPDATED_MODEL_PATH)
+            updated_model_output[int(id)] = label
+            count += 1
+            
+        self.save_to_json(base_model_output,"base_predictions.json")
+        self.save_to_json(updated_model_output,"updated_predictions.json")
+            
+        print(f"Accuracy of the base model on test set: {self.compute_accuracy(list(base_model_output.values()))}")
+        print(f"Accuracy of the updated model on test set: {self.compute_accuracy(list(updated_model_output.values()))}")
+
+        
+if __name__ == "__main__":
+    evaluate = Evaluate(args="Evaluate base model and updated model")
+    evaluate()
