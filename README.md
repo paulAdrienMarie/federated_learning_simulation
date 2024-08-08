@@ -18,13 +18,15 @@ The training occurs in the frontend in javascriptusing the `ONNXRUNTIME JAVASCRI
 
 ## DETAILS OF THE FILES 
 
-### Training
+### Prepare Dataset for Federated Learning scenario
 
 - `artifacts.py` : Script to create the training artifacts. See `README.md` in the artifacts folder
-- `check_conflict.py` : Script to check if there are duplicates in a dataset of images in a folder
-- `make_dataset.py` : Script to create the dataset to evaluate the model
-- `openai_request.py` : Script to create the `train.json` file - dataset used within the training loop in javascript
-- `base64images.py` : Script to create the `train_base64images.json` file that is used within the training loop in javascript
+- `LabelGenerator.py` : Script to generate a dataset of for image classification using chatgpt-4o
+- `DatasetCleaner.py` : Script to clean the dataset created by the LabelGenerator.py
+- `Base64aaGenerator.py` : Script to generate the string representation of the images using base64 encoding
+- `Pipeline.py` : Script to run the whole process of creating the dataset at once
+- `prepare_federated.py` : Creates a dataset as a json file for each user
+- `Evaluate.py` : Script to run the evaluation process and compare the base model with the model resulting of the federated learning
 
 
 ### Web Server
@@ -35,12 +37,3 @@ The training occurs in the frontend in javascriptusing the `ONNXRUNTIME JAVASCRI
 - `watcher.py` : Script to restart the server when a file is modified within the project
 
 
-### Federated Learning 
-
-- `evaluate.py` : Script to evaluate the difference between the base model and the updated model
-- `test_connection_selenium.py` : Script to run the federated learning scenario in headless mode - doesn't work yet
-- `utils_evaluate.py` : Functions used in the evaluate.py file
-- `utils.py` : Function used to clean the dataset created by the `openai_request.py`
-
-
- 
