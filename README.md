@@ -1,10 +1,12 @@
 # SIMULATION OF FEDERATED LEARNING
 
-This project aims to simulate a federated learning scenario on one single computer. The model used here is the Vision Transformer of google, googlevit patch16 224.
+This project simulates a federated learning scenario on one single computer. The model used here is the Vision Transformer of google, googlevit patch16 224.
+
+In a Federated Learning scenario, users are used to make a critical analysis of the ouptut of a model and retrain it if the ouptput doesn't seem correct to the user.
 
 In order to do this, the users are simulated by chatgpt which provides for each image used the true label. To create this dataset, we use the OPENAI API to loop over all the images of the dataset. At each comparison, if the model prediction is not the same as the prediction of chatgpt-4o, the model is trained on the prediction of chatgpt-4o. 
 
-The provided version runs for `100 users`. Each user has `20 images` to treat. For the training loop, for each image that needs to be trained, data augmentation is performed to provide a total of `7 images` to train on for a given label.
+The provided version runs for `200 users`. Each user has `14 images` to treat. For the training loop, for each image that needs to be trained, data augmentation is performed to provide a total of `7 images` to train on for a given label.
 
 The training occurs in the frontend in javascriptusing the `ONNXRUNTIME JAVASCRIPT API` that handles training. The updated weights are stored in a python backend that updates the model once all the new weights have been received.
 
